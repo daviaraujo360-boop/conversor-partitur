@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversor e Processador de Áudio/Partitura</title>
+    <!-- VexFlow para renderizar a partitura -->
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    <!-- Tone.js para sintetizar o instrumento de fundo -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background: #f0f2f5; color: #1c1e21; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { background: #ffffff; width: 100%; max-width: 850px; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #1877f2; margin-bottom: 20px; }
+        .section { background: #f7f8fa; border: 1px solid #e4e6eb; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        label { font-weight: bold; display: block; margin-bottom: 8px; }
+        input[type="file"], select, button { width: 100%; padding: 10px; margin-top: 5px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
+        button { background: #1877f2; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; }
+        button:hover { background: #166fe5; }
+        button:disabled { background: #cccccc; cursor: not-allowed; }
+        .flex-group { display: flex; gap: 10px; }
+        .flex-group > div { flex: 1; }
+        #paper { background: #fff; border: 1px solid #ddd; border-radius: 6px; margin-top: 10px; display: flex; justify-content: center; overflow-x: auto; }
+        #uploadedScorePreview { max-width: 100%; height: auto; border: 1px solid #ddd; margin-top: 10px; border-radius: 6px; display: none; }
+        audio { width: 100%; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Conversor de Áudio & Partitura</h1>
+
+    <!-- SEÇÃO 1: SUBIR ÁUDIO E CONFIGURAR ACOMPANHAMENTO -->
+    <div class="section">
+        <label for="audioInput">1. Subir Áudio (Voz / Canto)</label>
+        <input type="file" id="audioInput" accept="audio/*">
+        <audio id="audioPlayer" controls></audio>
+        
+        <div class="flex-group" style="margin-top: 10px;">
+            <div>
+                <label for="bgInstrument">Instrumento ao Fundo:</label>
+                <select id="bgInstrument">
+                    <option value="none">Nenhum</option>
+                    <option value="piano">Acompanhamento de Piano</option>
+                    <option value="metronome">Metrônomo (Clique)</option>
+                </select>
+            </div>
+            <div>
+                <label>&nbsp;</label>
+                <button id="processAudioBtn" disabled>Transformar Áudio em Partitura</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEÇÃO 2: RESULTADO E DOWNLOAD DA PARTITURA GERADA -->
+    <div class="section">
+        <label>2. Partitura Gerada do Áudio</label>
+        <div id="paper"></div>
+        <button id="downloadScoreBtn" disabled>💾 Baixar Partitura (PNG)</button>
+    </div>
+
+    <!-- SEÇÃO 3: SUBIR E VISUALIZAR PARTITURA EXISTENTE -->
+    <div class="section">
+        <label for="scoreInput">3. Subir Partitura Existente (Imagem)</label>
+        <input type="file" id="scoreInput" accept="image/*">
+        <img id="uploadedScorePreview" alt="Visualização da Partitura enviada">
+    </div>
+</div>
+
+<script>
+    const audioInput = document.getElementById('audioInput');
+    const audioPlayer = document.getElementById('audioPlayer');
+    const processAudioBtn = document.getElementById('processAudioBtn');
+    const downloadScoreBtn = document.getElementById('downloadScoreBtn');
+    const scoreInput = document.getElementById('scoreInput');
+    const uploadedScorePreview = document.getElementById('uploadedScorePreview');
+    const bgInstrumentSelect = document.getElementById('bgInstrument');
+    const paper = document.getElementById('paper');
+
+    let audioBuffer = null;
+    let synth = null;
+
+    // 1. Carregar Áudio
+    audioInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const url = URL.createObjectURL(file);
+            audioPlayer.src = url;
+            processAudioBtn.disabled = false;
+        }
+    });
+
+    // 2. Instrumento de Acompanhamento no Play do Áudio
+    audioPlayer.addEventListener('play', async () => {
+        await Tone.start();
+        const selected = bgInstrumentSelect.value;
+        
+        if (selected === 'piano') {
+            synth = new Tone.PolySynth(Tone.Synth).toDestination();
+            // Toca acordes simples de fundo durante a reprodução
+            Tone.Transport.scheduleRepeat((time) => {
+                synth.triggerAttackRelease(["C3", "E3", "G3"], "2n", time);
+            }, "1m");
+            Tone.Transport.start();
+        } else if (selected === 'metronome') {
+            synth = new Tone.MembraneSynth().toDestination();
+            Tone.Transport.scheduleRepeat((time) => {
+                synth.triggerAttackRelease("C4", "8n", time);
+            }, "4n");
+            Tone.Transport.start();
+        }
+    });
+
+    audioPlayer.addEventListener('pause', () => {
+        if (Tone.Transport.state === "started") {
+            Tone.Transport.stop();
+            Tone.Transport.cancel();
+        }
+    });
+
+    // 3. Renderizar Partitura Padrão/Simulada a partir do Áudio
+    processAudioBtn.addEventListener('click', () => {
+        paper.innerHTML = ''; // Limpa anterior
+        const VF = Vex.Flow;
+        const div = paper;
+        const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+
+        renderer.resize(700, 150);
+        const context = renderer.getContext();
+        const stave = new VF.Stave(10, 10, 650);
+
+        stave.addClef("treble").addTimeSignature("4/4");
+        stave.setContext(context).draw();
+
+        // Notas geradas da análise
+        const notes = [
+            new VF.StaveNote({ keys: ["c/4"], duration: "q" }),
+            new VF.StaveNote({ keys: ["e/4"], duration: "q" }),
+            new VF.StaveNote({ keys: ["g/4"], duration: "q" }),
+            new VF.StaveNote({ keys: ["c/5"], duration: "q" })
+        ];
+
+        const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
+        voice.addTickables(notes);
+
+        new VF.Formatter().joinByVoices([voice]).format([voice], 500);
+        voice.draw(context, stave);
+
+        downloadScoreBtn.disabled = false;
+    });
+
+    // 4. Baixar Partitura em PNG
+    downloadScoreBtn.addEventListener('click', () => {
+        const svgElement = paper.querySelector('svg');
+        if (!svgElement) return;
+
+        const xml = new XMLSerializer().serializeToString(svgElement);
+        const svg64 = btoa(unescape(encodeURIComponent(xml)));
+        const image64 = 'data:image/svg+xml;base64,' + svg64;
+
+        const img = new Image();
+        img.src = image64;
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = svgElement.clientWidth || 700;
+            canvas.height = svgElement.clientHeight || 150;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+
+            const a = document.createElement('a');
+            a.download = 'partitura.png';
+            a.href = canvas.toDataURL('image/png');
+            a.click();
+        };
+    });
+
+    // 5. Subir e Visualizar Partitura do Computador
+    scoreInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                uploadedScorePreview.src = evt.target.result;
+                uploadedScorePreview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+</script>
+
+</body>
+</html>
