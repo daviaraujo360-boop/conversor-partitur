@@ -3,11 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Conversor e Processador de Áudio/Partitura</title>
-    <!-- VexFlow para renderizar a partitura -->
+    <title>Conversor de Áudio & Partitura (com IA)</title>
     <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
-    <!-- Tone.js para sintetizar o instrumento de fundo -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background: #f0f2f5; color: #1c1e21; margin: 0; padding: 20px; display: flex; justify-content: center; }
@@ -15,139 +12,127 @@
         h1 { text-align: center; color: #1877f2; margin-bottom: 20px; }
         .section { background: #f7f8fa; border: 1px solid #e4e6eb; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
         label { font-weight: bold; display: block; margin-bottom: 8px; }
-        input[type="file"], select, button { width: 100%; padding: 10px; margin-top: 5px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
+        input[type="file"], button { width: 100%; padding: 10px; margin-top: 5px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
         button { background: #1877f2; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; }
         button:hover { background: #166fe5; }
         button:disabled { background: #cccccc; cursor: not-allowed; }
-        .flex-group { display: flex; gap: 10px; }
-        .flex-group > div { flex: 1; }
-        #paper { background: #fff; border: 1px solid #ddd; border-radius: 6px; margin-top: 10px; display: flex; justify-content: center; overflow-x: auto; }
-        #uploadedScorePreview { max-width: 100%; height: auto; border: 1px solid #ddd; margin-top: 10px; border-radius: 6px; display: none; }
+        #statusMsg { font-weight: bold; color: #1877f2; margin-top: 10px; text-align: center; display: none; }
+        #paper { background: #fff; border: 1px solid #ddd; border-radius: 6px; margin-top: 10px; display: flex; justify-content: center; overflow-x: auto; min-height: 150px; }
         audio { width: 100%; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Conversor de Áudio & Partitura</h1>
+    <h1>Conversor de Áudio & Partitura (IA)</h1>
 
-    <!-- SEÇÃO 1: SUBIR ÁUDIO E CONFIGURAR ACOMPANHAMENTO -->
     <div class="section">
-        <label for="audioInput">1. Subir Áudio (Voz / Canto)</label>
+        <label for="audioInput">1. Subir Áudio (Voz / Instrumento)</label>
         <input type="file" id="audioInput" accept="audio/*">
         <audio id="audioPlayer" controls></audio>
-        
-        <div class="flex-group" style="margin-top: 10px;">
-            <div>
-                <label for="bgInstrument">Instrumento ao Fundo:</label>
-                <select id="bgInstrument">
-                    <option value="none">Nenhum</option>
-                    <option value="piano">Acompanhamento de Piano</option>
-                    <option value="metronome">Metrônomo (Clique)</option>
-                </select>
-            </div>
-            <div>
-                <label>&nbsp;</label>
-                <button id="processAudioBtn" disabled>Transformar Áudio em Partitura</button>
-            </div>
-        </div>
+        <button id="processAudioBtn" disabled>🤖 Transcrever Áudio com IA</button>
+        <div id="statusMsg">Processando áudio com a IA...</div>
     </div>
 
-    <!-- SEÇÃO 2: RESULTADO E DOWNLOAD DA PARTITURA GERADA -->
     <div class="section">
-        <label>2. Partitura Gerada do Áudio</label>
+        <label>2. Partitura Real Gerada</label>
         <div id="paper"></div>
         <button id="downloadScoreBtn" disabled>💾 Baixar Partitura (PNG)</button>
-    </div>
-
-    <!-- SEÇÃO 3: SUBIR E VISUALIZAR PARTITURA EXISTENTE -->
-    <div class="section">
-        <label for="scoreInput">3. Subir Partitura Existente (Imagem)</label>
-        <input type="file" id="scoreInput" accept="image/*">
-        <img id="uploadedScorePreview" alt="Visualização da Partitura enviada">
     </div>
 </div>
 
 <script>
+    const API_URL = "https://api-conversor-partitura.onrender.com";
+
     const audioInput = document.getElementById('audioInput');
     const audioPlayer = document.getElementById('audioPlayer');
     const processAudioBtn = document.getElementById('processAudioBtn');
     const downloadScoreBtn = document.getElementById('downloadScoreBtn');
-    const scoreInput = document.getElementById('scoreInput');
-    const uploadedScorePreview = document.getElementById('uploadedScorePreview');
-    const bgInstrumentSelect = document.getElementById('bgInstrument');
+    const statusMsg = document.getElementById('statusMsg');
     const paper = document.getElementById('paper');
 
-    let synth = null;
+    let currentFile = null;
 
-    // 1. Carregar Áudio
     audioInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (file) {
-            const url = URL.createObjectURL(file);
-            audioPlayer.src = url;
+            currentFile = file;
+            audioPlayer.src = URL.createObjectURL(file);
             processAudioBtn.disabled = false;
         }
     });
 
-    // 2. Instrumento de Acompanhamento no Play do Áudio
-    audioPlayer.addEventListener('play', async () => {
-        await Tone.start();
-        const selected = bgInstrumentSelect.value;
-        
-        if (selected === 'piano') {
-            synth = new Tone.PolySynth(Tone.Synth).toDestination();
-            Tone.Transport.scheduleRepeat((time) => {
-                synth.triggerAttackRelease(["C3", "E3", "G3"], "2n", time);
-            }, "1m");
-            Tone.Transport.start();
-        } else if (selected === 'metronome') {
-            synth = new Tone.MembraneSynth().toDestination();
-            Tone.Transport.scheduleRepeat((time) => {
-                synth.triggerAttackRelease("C4", "8n", time);
-            }, "4n");
-            Tone.Transport.start();
+    function midiToVexKey(midi) {
+        const noteNames = ["c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b"];
+        const octave = Math.floor(midi / 12) - 1;
+        const name = noteNames[midi % 12];
+        return `${name}/${octave}`;
+    }
+
+    processAudioBtn.addEventListener('click', async () => {
+        if (!currentFile) return;
+
+        processAudioBtn.disabled = true;
+        statusMsg.style.display = 'block';
+        statusMsg.innerText = "Enviando para a IA no servidor e analisando frequências...";
+        paper.innerHTML = '';
+
+        const formData = new FormData();
+        formData.append('file', currentFile);
+
+        try {
+            const response = await fetch(`${API_URL}/convert`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.notes && data.notes.length > 0) {
+                statusMsg.innerText = `Sucesso! ${data.total_notes} notas detectadas pela IA. Desenhando partitura...`;
+                renderScore(data.notes.slice(0, 8));
+                downloadScoreBtn.disabled = false;
+            } else {
+                statusMsg.innerText = "Nenhuma nota clara foi detectada no áudio.";
+            }
+        } catch (error) {
+            console.error(error);
+            statusMsg.innerText = "Erro ao conectar com a API de IA.";
+        } finally {
+            processAudioBtn.disabled = false;
         }
     });
 
-    audioPlayer.addEventListener('pause', () => {
-        if (Tone.Transport.state === "started") {
-            Tone.Transport.stop();
-            Tone.Transport.cancel();
-        }
-    });
-
-    // 3. Renderizar Partitura Padrão/Simulada a partir do Áudio
-    processAudioBtn.addEventListener('click', () => {
+    function renderScore(notesData) {
         paper.innerHTML = ''; 
-        const VF = Vex.Flow;
-        const div = paper;
-        const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
-
+        const { Renderer, Stave, StaveNote, Voice, Formatter } = Vex.Flow;
+        
+        const renderer = new Renderer(paper, Renderer.Backends.SVG);
         renderer.resize(700, 150);
         const context = renderer.getContext();
-        const stave = new VF.Stave(10, 10, 650);
+        const stave = new Stave(10, 10, 650);
 
         stave.addClef("treble").addTimeSignature("4/4");
         stave.setContext(context).draw();
 
-        const notes = [
-            new VF.StaveNote({ keys: ["c/4"], duration: "q" }),
-            new VF.StaveNote({ keys: ["e/4"], duration: "q" }),
-            new VF.StaveNote({ keys: ["g/4"], duration: "q" }),
-            new VF.StaveNote({ keys: ["c/5"], duration: "q" })
-        ];
+        const vexNotes = notesData.map(n => {
+            const key = midiToVexKey(n.pitch);
+            try {
+                return new StaveNote({ keys: [key], duration: "q" });
+            } catch (err) {
+                return new StaveNote({ keys: ["c/4"], duration: "q" });
+            }
+        });
 
-        const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
-        voice.addTickables(notes);
+        if (vexNotes.length > 0) {
+            const voice = new Voice({ num_beats: vexNotes.length, beat_value: 4 });
+            voice.addTickables(vexNotes);
+            
+            new Formatter().joinVoices([voice]).format([voice], 500);
+            voice.draw(context, stave);
+        }
+    }
 
-        new VF.Formatter().joinByVoices([voice]).format([voice], 500);
-        voice.draw(context, stave);
-
-        downloadScoreBtn.disabled = false;
-    });
-
-    // 4. Baixar Partitura em PNG (Otimizado)
     downloadScoreBtn.addEventListener('click', () => {
         const svgElement = paper.querySelector('svg');
         if (!svgElement) return;
@@ -171,7 +156,7 @@
             canvas.toBlob((blob) => {
                 const downloadUrl = URLObj.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.download = 'partitura.png';
+                a.download = 'partitura-ia.png';
                 a.href = downloadUrl;
                 document.body.appendChild(a);
                 a.click();
@@ -180,19 +165,6 @@
             }, 'image/png');
         };
         img.src = blobURL;
-    });
-
-    // 5. Subir e Visualizar Partitura do Computador
-    scoreInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = function(evt) {
-                uploadedScorePreview.src = evt.target.result;
-                uploadedScorePreview.style.display = 'block';
-            };
-            reader.readAsDataURL(file);
-        }
     });
 </script>
 
